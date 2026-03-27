@@ -1,0 +1,9 @@
+# Generated outputs/cache. Keep these local so reruns stay idempotent.
+raw_leads.json
+qualified_leads.json
+sync_log.json
+filter_checkpoint.json
+scraper.log
+.env
+venv/
+__pycache__/
