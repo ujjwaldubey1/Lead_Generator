@@ -11,6 +11,12 @@ except ImportError:  # pragma: no cover - optional until Playwright is installed
     sync_playwright = None  # type: ignore[assignment]
 
 
+try:
+    from .scrapers.browser_utils import launch_chromium
+except ImportError:  # pragma: no cover - direct script execution fallback.
+    from scrapers.browser_utils import launch_chromium
+
+
 BASE_DIR = Path(__file__).resolve().parent
 COOKIES_DIR = BASE_DIR / "cookies"
 
@@ -28,7 +34,7 @@ def save_cookies(platform: str, url: str, output_path: Path) -> None:
 
     try:
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=False)
+            browser = launch_chromium(playwright, headless=False)
             context = browser.new_context()
             page = context.new_page()
             page.goto(url, timeout=30_000)

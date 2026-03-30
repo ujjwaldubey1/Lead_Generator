@@ -1,6 +1,7 @@
 # Generated outputs/cache. Keep these local so reruns stay idempotent.
 raw_leads.json
 qualified_leads.json
+leads_output.json
 sync_log.json
 filter_checkpoint.json
 scraper.log
@@ -9,3 +10,6 @@ venv/
 __pycache__/
 cookies/
 cookies/*.json
+linkedin_browser_profile/
+debug_linkedin.html
+debug_linkedin.png

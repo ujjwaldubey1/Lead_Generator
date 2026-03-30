@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 import time
 from typing import Any
 
@@ -52,6 +53,61 @@ def _is_valid_post(lead: Lead) -> bool:
     return True
 
 
+def _request_with_backoff(
+    session: Any,
+    request_url: str,
+    headers: dict[str, str],
+    params: dict[str, str | int],
+    subreddit: str,
+    keyword: str,
+) -> Any | None:
+    """Issue a Reddit request with limited retry and 429 backoff handling."""
+
+    backoff_seconds = max(float(SCRAPE_DELAY), 4.0)
+
+    for attempt in range(3):
+        try:
+            response = session.get(
+                request_url,
+                headers=headers,
+                params=params,
+                timeout=REQUEST_TIMEOUT,
+            )
+            if response.status_code == 429:
+                retry_after_raw = str(response.headers.get("Retry-After", "")).strip()
+                retry_after = float(retry_after_raw) if retry_after_raw else 0.0
+                wait_seconds = max(backoff_seconds, retry_after) + random.uniform(1.0, 3.0)
+                logger.warning(
+                    "Reddit rate limited for r/%s keyword '%s'. Waiting %.1fs before retry %s.",
+                    subreddit,
+                    keyword,
+                    wait_seconds,
+                    attempt + 1,
+                )
+                time.sleep(wait_seconds)
+                backoff_seconds = min(backoff_seconds * 2, 60.0)
+                continue
+
+            response.raise_for_status()
+            return response
+        except requests.RequestException as exc:
+            if getattr(exc.response, "status_code", None) == 429 and attempt < 2:
+                wait_seconds = backoff_seconds + random.uniform(1.0, 3.0)
+                logger.warning(
+                    "Reddit 429 for r/%s keyword '%s'. Waiting %.1fs before retry %s.",
+                    subreddit,
+                    keyword,
+                    wait_seconds,
+                    attempt + 1,
+                )
+                time.sleep(wait_seconds)
+                backoff_seconds = min(backoff_seconds * 2, 60.0)
+                continue
+            raise
+
+    return None
+
+
 def scrape_reddit(subreddits: list[str], keywords: list[str]) -> list[Lead]:
     """Scrape matching Reddit posts from the public search JSON endpoint."""
 
@@ -61,9 +117,10 @@ def scrape_reddit(subreddits: list[str], keywords: list[str]) -> list[Lead]:
         logger.warning("requests is not installed; skipping Reddit scraping.")
         return []
 
-    headers = {"User-Agent": REDDIT_USER_AGENT}
+    headers = {"User-Agent": REDDIT_USER_AGENT, "Accept": "application/json"}
     leads: list[Lead] = []
     seen_ids: set[str] = set()
+    session = requests.Session()
 
     for subreddit in subreddits:
         for keyword in keywords:
@@ -77,12 +134,16 @@ def scrape_reddit(subreddits: list[str], keywords: list[str]) -> list[Lead]:
             }
 
             try:
-                response = requests.get(
+                response = _request_with_backoff(
+                    session,
                     request_url,
-                    headers=headers,
-                    params=params,
-                    timeout=REQUEST_TIMEOUT,
+                    headers,
+                    params,
+                    subreddit,
+                    keyword,
                 )
+                if response is None:
+                    continue
                 response.raise_for_status()
                 payload = response.json()
                 children = payload.get("data", {}).get("children", [])
@@ -112,7 +173,7 @@ def scrape_reddit(subreddits: list[str], keywords: list[str]) -> list[Lead]:
                     exc,
                 )
             finally:
-                time.sleep(SCRAPE_DELAY)
+                time.sleep(SCRAPE_DELAY + random.uniform(1.0, 2.5))
 
     logger.info("Collected %s Reddit posts before deduplication.", len(leads))
     return leads

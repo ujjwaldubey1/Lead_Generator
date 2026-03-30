@@ -28,9 +28,11 @@ except ImportError:  # pragma: no cover - optional until playwright-stealth is i
     stealth_sync = None  # type: ignore[assignment]
 
 try:
+    from .browser_utils import launch_chromium
     from ..config import BASE_DIR
     from ..utils.logger import get_logger
 except ImportError:  # pragma: no cover - direct script execution fallback.
+    from scrapers.browser_utils import launch_chromium
     from config import BASE_DIR
     from utils.logger import get_logger
 
@@ -89,7 +91,7 @@ def find_email_from_profile(profile_url: str, platform: str) -> str | None:
 
     try:
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
+            browser = launch_chromium(playwright, headless=True)
             context = browser.new_context(
                 user_agent=_user_agent(),
                 viewport={"width": 1280, "height": 800},
