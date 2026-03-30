@@ -100,6 +100,7 @@ def build_record(lead: Lead) -> Record:
         "Buying intent": buying_intent if buying_intent else "None",
         "Post title": str(lead.get("title", "")).strip(),
         "Subreddit": str(lead.get("subreddit", "")).strip() if platform == "Reddit" else "",
+        "Outreach type": str(lead.get("outreach_type", "manual_dm")).replace("_", " ").title(),
         "Status": "New",
         "Email": str(lead.get("email", "")).strip(),
         "Notes": str(lead.get("notes", "")).strip(),

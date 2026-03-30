@@ -47,6 +47,13 @@ FIELDS_TO_CREATE: list[dict[str, Any]] = [
     {"name": "Post title", "type": "singleLineText"},
     {"name": "Subreddit", "type": "singleLineText"},
     {
+        "name": "Outreach type",
+        "type": "singleSelect",
+        "options": {
+            "choices": [{"name": "Cold email"}, {"name": "Manual dm"}],
+        },
+    },
+    {
         "name": "Status",
         "type": "singleSelect",
         "options": {
@@ -55,6 +62,7 @@ FIELDS_TO_CREATE: list[dict[str, Any]] = [
                 {"name": "Reviewed"},
                 {"name": "Contacted"},
                 {"name": "Replied"},
+                {"name": "Manual DM"},
                 {"name": "No email"},
                 {"name": "Closed"},
             ],

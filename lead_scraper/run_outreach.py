@@ -23,20 +23,18 @@ except ImportError:  # pragma: no cover - optional until dependencies are instal
 
 try:
     from .config import BASE_DIR
-    from .outreach.email_finder import find_email
     from .outreach.email_writer import generate_email
     from .outreach.instantly_client import add_lead_to_campaign
     from .utils.logger import get_logger
 except ImportError:  # pragma: no cover - direct script execution fallback.
     from config import BASE_DIR
-    from outreach.email_finder import find_email
     from outreach.email_writer import generate_email
     from outreach.instantly_client import add_lead_to_campaign
     from utils.logger import get_logger
 
 
 logger = get_logger(__name__)
-MANUAL_DM_STATUS = "Reviewed"
+MANUAL_DM_STATUS = "Manual DM"
 
 
 def _load_env() -> dict[str, str]:
@@ -47,7 +45,6 @@ def _load_env() -> dict[str, str]:
         "airtable_api_key": os.getenv("AIRTABLE_API_KEY", "").strip(),
         "airtable_base_id": os.getenv("AIRTABLE_BASE_ID", "").strip(),
         "airtable_table_name": os.getenv("AIRTABLE_TABLE_NAME", "Leads").strip(),
-        "hunter_api_key": os.getenv("HUNTER_API_KEY", "").strip(),
         "instantly_api_key": os.getenv("INSTANTLY_API_KEY", "").strip(),
         "instantly_campaign_id": os.getenv("INSTANTLY_CAMPAIGN_ID", "").strip(),
         "service_description": os.getenv("SERVICE_DESCRIPTION", "").strip(),
@@ -80,16 +77,54 @@ def _manual_dm_note(fields: dict[str, Any], platform: str, handle: str) -> str:
 
     post_url = str(fields.get("Post URL", "")).strip()
     pain_point = str(fields.get("Pain point", "")).strip()
-    return (
-        f"Manual DM required. Platform: {platform or 'unknown'} | "
+    existing_notes = str(fields.get("Notes", "")).strip()
+    base_note = (
+        f"No email found - DM via {platform or 'unknown'}. "
         f"Handle: {handle or 'unknown'} | "
         f"Post URL: {post_url or 'n/a'} | "
         f"Pain point: {pain_point or 'n/a'}"
     )
+    return f"{base_note} | {existing_notes}" if existing_notes else base_note
+
+
+def _email_settings_ready(config: dict[str, str]) -> bool:
+    """Return whether the cold-email path has the required configuration."""
+
+    return all(
+        (
+            config["instantly_api_key"],
+            config["instantly_campaign_id"],
+            config["service_description"],
+            config["sender_name"],
+            config["sender_company"],
+            config["calendar_link"],
+        )
+    )
+
+
+def _should_use_manual_dm(fields: dict[str, Any], platform: str) -> bool:
+    """Decide whether a record should stay in the manual-DM queue."""
+
+    email = str(fields.get("Email", "")).strip()
+    outreach_type = str(fields.get("Outreach type", "")).strip().lower()
+    return platform == "reddit" or not email or outreach_type == "manual dm"
+
+
+def _mark_manual_dm(table: Any, record_id: str, fields: dict[str, Any], platform: str, handle: str) -> bool:
+    """Update a record to the manual-DM queue with a human-friendly note."""
+
+    return _update_record(
+        table,
+        record_id,
+        {
+            "Status": MANUAL_DM_STATUS,
+            "Notes": _manual_dm_note(fields, platform, handle),
+        },
+    )
 
 
 def main(exit_on_error: bool = True) -> dict[str, Any]:
-    """Run outreach for all Airtable leads with Status = New."""
+    """Run outreach for Airtable leads that are either new or need retrying."""
 
     config = _load_env()
     if Api is None:
@@ -109,13 +144,6 @@ def main(exit_on_error: bool = True) -> dict[str, Any]:
         config["airtable_api_key"],
         config["airtable_base_id"],
         config["airtable_table_name"],
-        config["hunter_api_key"],
-        config["instantly_api_key"],
-        config["instantly_campaign_id"],
-        config["service_description"],
-        config["sender_name"],
-        config["sender_company"],
-        config["calendar_link"],
     )
     if not all(required_values):
         print("Outreach configuration is incomplete. Check your .env file.")
@@ -157,37 +185,20 @@ def main(exit_on_error: bool = True) -> dict[str, Any]:
         handle = str(fields.get("Handle", "")).strip()
         platform = str(fields.get("Platform", "")).strip().lower()
 
-        if platform == "reddit":
-            _update_record(
-                table,
-                record_id,
-                {
-                    "Status": MANUAL_DM_STATUS,
-                    "Notes": _manual_dm_note(fields, platform, handle),
-                },
-            )
+        if _should_use_manual_dm(fields, platform):
+            _mark_manual_dm(table, record_id, fields, platform, handle)
             summary["manual_dm"] += 1
             time.sleep(1)
             continue
 
-        email_result = find_email(handle, platform, config["hunter_api_key"])
-        email = str(email_result.get("email") or "").strip()
-
-        if not email:
-            _update_record(
-                table,
-                record_id,
-                {
-                    "Status": MANUAL_DM_STATUS,
-                    "Notes": _manual_dm_note(fields, platform, handle),
-                },
-            )
-            summary["manual_dm"] += 1
+        if not _email_settings_ready(config):
+            logger.error("Cold-email configuration missing for record=%s platform=%s", record_id, platform)
+            summary["errors"] += 1
             time.sleep(1)
             continue
 
+        email = str(fields.get("Email", "")).strip()
         summary["found"] += 1
-        _update_record(table, record_id, {"Email": email})
 
         lead = {
             "id": record_id,
